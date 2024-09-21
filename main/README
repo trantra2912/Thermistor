@@ -1,0 +1,508 @@
+#include "driver/i2c.h"
+#include "esp_log.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <string.h>
+#include "lcd-i2c.h"
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/task.h"
+#include "driver/gpio.h"
+#include "esp_adc_cal.h"
+#include "unistd.h"
+#include <time.h>
+
+#define Den1 27
+#define Den2 26
+
+float V0=4095, R1= 5000, R0=10000,B=3950,T0=298.15;
+float V1, v1, R2, r, T;
+
+static esp_adc_cal_characteristics_t adc1_chars;
+static const char *TAG = "i2c-simple-example";
+char buffer[15];
+
+TaskHandle_t myTaskHandle = NULL;
+TaskHandle_t myTaskHandle1 = NULL;
+TaskHandle_t myTaskHandle2 = NULL;
+
+QueueHandle_t queue;
+static esp_err_t i2c_master_init(void)
+{
+    int i2c_master_port = I2C_NUM_0;
+
+    i2c_config_t conf = {
+        .mode = I2C_MODE_MASTER,
+        .sda_io_num = GPIO_NUM_21,
+        .scl_io_num = GPIO_NUM_22,
+        .sda_pullup_en = GPIO_PULLUP_ENABLE,
+        .scl_pullup_en = GPIO_PULLUP_ENABLE,
+        .master.clk_speed = 100000,
+    };
+
+    i2c_param_config(i2c_master_port, &conf);
+
+    return i2c_driver_install(i2c_master_port, conf.mode, 0, 0, 0);
+}
+void Do(void *arg)
+{
+  int a;
+    
+    while(1)
+    {
+    
+        V1 = adc1_get_raw(ADC1_CHANNEL_4); //lấy giá trị adc
+        v1 = esp_adc_cal_raw_to_voltage(V1, &adc1_chars); //đọc giá trị điện áp từ giá trị adc
+        R2=R1*(V0/V1-1);
+        T=B/log(R2/r)-273.15;
+         if(T<20)
+           {
+             a=1;
+             xQueueSend(queue, &a, (TickType_t)0);
+             xQueueSend(queue, &a, (TickType_t)0); // ghi dữ liệu vào hàng đợi
+            }
+            else if(T>=20 && T<=24)
+            {
+             a=2;
+             xQueueSend(queue, &a, (TickType_t)0);
+             xQueueSend(queue, &a, (TickType_t)0);
+        
+            }     
+            else
+            {
+              a=3;
+             xQueueSend(queue, &a, (TickType_t)0);
+             xQueueSend(queue, &a, (TickType_t)0);
+            }  
+        vTaskDelay(1000/ portTICK_RATE_MS);
+    
+    }
+}
+
+void Nhay1(void *arg)
+{
+  int b; //tạo kí tự để lưu trữ dữ liệu sẽ nhận từ hàng đợi
+  while(1)
+  {
+     xQueueReceive(queue, &b, (TickType_t)1000); //đọc dữ liệu từ hàng đợi
+    if(b==1)
+    { 
+      printf("Received data from queue == %d, ", b);
+      gpio_set_level(Den1, 1);
+      vTaskDelay(500/ portTICK_RATE_MS);
+      gpio_set_level(Den1, 0);
+      vTaskDelay(500/ portTICK_RATE_MS);
+    }
+    else if(b==2)
+    {
+      printf("Received data from queue == %d, ", b);
+      gpio_set_level(Den1, 1);
+      vTaskDelay(500/ portTICK_RATE_MS);
+      gpio_set_level(Den1, 0);
+      vTaskDelay(500/ portTICK_RATE_MS);
+    
+    }
+    else if(b==3)
+    {
+      printf("Received data from queue == %d, ", b);
+      gpio_set_level(Den1, 0);
+      
+    }
+  }
+}
+void Nhay2(void *arg)
+{
+  int c; //tạo kí tự để lưu trữ dữ liệu sẽ nhận từ hàng đợi
+  while(1)
+  {
+     xQueueReceive(queue, &c, (TickType_t)1000); //đọc dữ liệu từ hàng đợi
+    if(c==1)
+    {
+      printf("T1= %f, V1=%f, v1=%f mV, R2=%f\n", T, V1, v1, R2);
+      gpio_set_level(Den2, 0);
+      vTaskDelay(500/ portTICK_RATE_MS);
+    }
+    else if(c==2)
+    {
+      printf("T2= %f, V1=%f, v1=%f mV, R2=%f\n", T, V1, v1, R2);
+      gpio_set_level(Den2, 1);
+      vTaskDelay(250/ portTICK_RATE_MS);
+      gpio_set_level(Den2, 0);
+      vTaskDelay(250/ portTICK_RATE_MS);
+      gpio_set_level(Den2, 1);
+      vTaskDelay(250/ portTICK_RATE_MS);
+      gpio_set_level(Den2, 0);
+      vTaskDelay(250/ portTICK_RATE_MS);
+    
+    }
+    else if(c==3)
+    {
+      printf("T3= %f, V1=%f, v1=%f mV, R2=%f\n", T, V1, v1, R2);
+      gpio_set_level(Den2, 1);
+      vTaskDelay(125/ portTICK_RATE_MS);
+      gpio_set_level(Den2, 0);
+      vTaskDelay(125/ portTICK_RATE_MS);
+      gpio_set_level(Den2, 1);
+      vTaskDelay(125/ portTICK_RATE_MS);
+      gpio_set_level(Den2, 0);
+      vTaskDelay(125/ portTICK_RATE_MS);
+      gpio_set_level(Den2, 1);
+      vTaskDelay(125/ portTICK_RATE_MS);
+      gpio_set_level(Den2, 0);
+      vTaskDelay(125/ portTICK_RATE_MS);
+      gpio_set_level(Den2, 1);
+      vTaskDelay(125/ portTICK_RATE_MS);
+      gpio_set_level(Den2, 0);
+      vTaskDelay(125/ portTICK_RATE_MS);
+    }
+  }
+}
+  
+
+void app_main(void)
+{
+  gpio_pad_select_gpio(Den1); //đặt cấu hình Den1 làm GPIO
+  gpio_pad_select_gpio(Den2); 
+  gpio_set_direction(Den1, GPIO_MODE_OUTPUT);// đặt Den1 làm đầu ra
+  gpio_set_direction(Den2, GPIO_MODE_OUTPUT);
+  esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_DEFAULT, 0, &adc1_chars); //hiệu chỉnh ADC1 ở mức suy giảm 11db
+
+  adc1_config_width(ADC_WIDTH_BIT_DEFAULT); // đặt cấu hình ADC1 ở độ rộng bit mặc định (12bit)
+  adc1_config_channel_atten(ADC1_CHANNEL_4, ADC_ATTEN_DB_11);// đặt tham số suy giảm của ADC1 kênh 4 là GPIO32 thành 11db
+  r=R0*exp(-B/T0); 
+  
+  queue = xQueueCreate(5, sizeof(int));// tạo hàng đợi
+
+  xTaskCreate(Do, "Do", 2048, NULL, 10, &myTaskHandle);
+  xTaskCreatePinnedToCore(Nhay1, "Nhay1", 2048, NULL,10, &myTaskHandle1, 0);
+  xTaskCreatePinnedToCore(Nhay2, "Nhay2", 2048, NULL,10, &myTaskHandle2, 1);
+   ESP_ERROR_CHECK(i2c_master_init());
+    ESP_LOGI(TAG, "I2C initialized successfully");
+
+    lcd_init();
+    lcd_clear();
+    while(1){
+// 	lcd_put_cur(0, 0);
+//    lcd_send_string("Hello world!");
+
+//    lcd_put_cur(1, 0);
+//    lcd_send_string("from ESP32");
+
+    sprintf(buffer, "T=%.6f", T);
+    lcd_put_cur(1, 0);
+    lcd_send_string(buffer);	
+	vTaskDelay(1000/ portTICK_RATE_MS);
+}
+}
+
+
+
+
+
+
+#include "driver/i2c.h"
+#include "esp_log.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <string.h>
+#include "lcd-i2c.h"
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/task.h"
+#include "driver/gpio.h"
+#include "esp_adc_cal.h"
+#include "unistd.h"
+#include <time.h>
+
+#define Den1 27
+#define Den2 26
+
+float V0=4095, R1= 5000, R0=10000,B=3950,T0=298.15;
+float V1, v1, R2, r, T, DObh;
+
+static esp_adc_cal_characteristics_t adc1_chars;
+static const char *TAG = "i2c-simple-example";
+char buffer[15];
+
+TaskHandle_t myTaskHandle = NULL;
+TaskHandle_t myTaskHandle1 = NULL;
+TaskHandle_t myTaskHandle2 = NULL;
+
+QueueHandle_t queue;
+static esp_err_t i2c_master_init(void)
+{
+    int i2c_master_port = I2C_NUM_0;
+
+    i2c_config_t conf = {
+        .mode = I2C_MODE_MASTER,
+        .sda_io_num = GPIO_NUM_21,
+        .scl_io_num = GPIO_NUM_22,
+        .sda_pullup_en = GPIO_PULLUP_ENABLE,
+        .scl_pullup_en = GPIO_PULLUP_ENABLE,
+        .master.clk_speed = 100000,
+    };
+
+    i2c_param_config(i2c_master_port, &conf);
+
+    return i2c_driver_install(i2c_master_port, conf.mode, 0, 0, 0);
+}
+void Do(void *arg)
+{
+  int a;
+    
+    while(1)
+    {
+    
+        V1 = adc1_get_raw(ADC1_CHANNEL_4); //lấy giá trị adc
+        v1 = esp_adc_cal_raw_to_voltage(V1, &adc1_chars); //đọc giá trị điện áp từ giá trị adc
+        R2=R1*(V0/V1-1);
+        T=B/log(R2/r)-273.15;
+        DObh=14.652-0.41022*T +0.007991*pow(T, 2) - 0.000077774*pow(T, 3);
+
+         if(T<20)
+           {
+             a=1;
+             xQueueSend(queue, &a, (TickType_t)0);
+             xQueueSend(queue, &a, (TickType_t)0); // ghi dữ liệu vào hàng đợi
+            }
+            else if(T>=20 && T<=24)
+            {
+             a=2;
+             xQueueSend(queue, &a, (TickType_t)0);
+             xQueueSend(queue, &a, (TickType_t)0);
+        
+            }     
+            else
+            {
+              a=3;
+             xQueueSend(queue, &a, (TickType_t)0);
+             xQueueSend(queue, &a, (TickType_t)0);
+            }  
+        vTaskDelay(1000/ portTICK_RATE_MS);
+    
+    }
+}
+
+void Nhay1(void *arg)
+{
+  int b; //tạo kí tự để lưu trữ dữ liệu sẽ nhận từ hàng đợi
+  while(1)
+  {
+     xQueueReceive(queue, &b, (TickType_t)1000); //đọc dữ liệu từ hàng đợi
+    if(b==1)
+    { 
+      printf("Received data from queue == %d, ", b);
+      gpio_set_level(Den1, 1);
+      vTaskDelay(500/ portTICK_RATE_MS);
+      gpio_set_level(Den1, 0);
+      vTaskDelay(500/ portTICK_RATE_MS);
+    }
+    else if(b==2)
+    {
+      printf("Received data from queue == %d, ", b);
+      gpio_set_level(Den1, 1);
+      vTaskDelay(500/ portTICK_RATE_MS);
+      gpio_set_level(Den1, 0);
+      vTaskDelay(500/ portTICK_RATE_MS);
+    
+    }
+    else if(b==3)
+    {
+      printf("Received data from queue == %d, ", b);
+      gpio_set_level(Den1, 0);
+      
+    }
+  }
+}
+void Nhay2(void *arg)
+{
+  int c; //tạo kí tự để lưu trữ dữ liệu sẽ nhận từ hàng đợi
+  while(1)
+  {
+     xQueueReceive(queue, &c, (TickType_t)1000); //đọc dữ liệu từ hàng đợi
+    if(c==1)
+    {
+      printf("T1= %f, V1=%f, v1=%f mV, R2=%f\n", T, V1, v1, R2);
+      gpio_set_level(Den2, 0);
+      vTaskDelay(500/ portTICK_RATE_MS);
+    }
+    else if(c==2)
+    {
+      printf("T2= %f, V1=%f, v1=%f mV, R2=%f\n", T, V1, v1, R2);
+      gpio_set_level(Den2, 1);
+      vTaskDelay(250/ portTICK_RATE_MS);
+      gpio_set_level(Den2, 0);
+      vTaskDelay(250/ portTICK_RATE_MS);
+      gpio_set_level(Den2, 1);
+      vTaskDelay(250/ portTICK_RATE_MS);
+      gpio_set_level(Den2, 0);
+      vTaskDelay(250/ portTICK_RATE_MS);
+    
+    }
+    else if(c==3)
+    {
+      printf("T3= %f, V1=%f, v1=%f mV, R2=%f\n", T, V1, v1, R2);
+      gpio_set_level(Den2, 1);
+      vTaskDelay(125/ portTICK_RATE_MS);
+      gpio_set_level(Den2, 0);
+      vTaskDelay(125/ portTICK_RATE_MS);
+      gpio_set_level(Den2, 1);
+      vTaskDelay(125/ portTICK_RATE_MS);
+      gpio_set_level(Den2, 0);
+      vTaskDelay(125/ portTICK_RATE_MS);
+      gpio_set_level(Den2, 1);
+      vTaskDelay(125/ portTICK_RATE_MS);
+      gpio_set_level(Den2, 0);
+      vTaskDelay(125/ portTICK_RATE_MS);
+      gpio_set_level(Den2, 1);
+      vTaskDelay(125/ portTICK_RATE_MS);
+      gpio_set_level(Den2, 0);
+      vTaskDelay(125/ portTICK_RATE_MS);
+    }
+  }
+}
+  
+
+void app_main(void)
+{
+  gpio_pad_select_gpio(Den1); //đặt cấu hình Den1 làm GPIO
+  gpio_pad_select_gpio(Den2); 
+  gpio_set_direction(Den1, GPIO_MODE_OUTPUT);// đặt Den1 làm đầu ra
+  gpio_set_direction(Den2, GPIO_MODE_OUTPUT);
+  esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_DEFAULT, 0, &adc1_chars); //hiệu chỉnh ADC1 ở mức suy giảm 11db
+
+  adc1_config_width(ADC_WIDTH_BIT_DEFAULT); // đặt cấu hình ADC1 ở độ rộng bit mặc định (12bit)
+  adc1_config_channel_atten(ADC1_CHANNEL_4, ADC_ATTEN_DB_11);// đặt tham số suy giảm của ADC1 kênh 4 là GPIO32 thành 11db
+  r=R0*exp(-B/T0); 
+  
+  queue = xQueueCreate(5, sizeof(int));// tạo hàng đợi
+
+  xTaskCreate(Do, "Do", 2048, NULL, 10, &myTaskHandle);
+  xTaskCreatePinnedToCore(Nhay1, "Nhay1", 2048, NULL,10, &myTaskHandle1, 0);
+  xTaskCreatePinnedToCore(Nhay2, "Nhay2", 2048, NULL,10, &myTaskHandle2, 1);
+   ESP_ERROR_CHECK(i2c_master_init());
+    ESP_LOGI(TAG, "I2C initialized successfully");
+
+    lcd_init();
+    lcd_clear();
+    while(1){
+    sprintf(buffer, "DObh=%.6f", DObh);
+    lcd_put_cur(1, 0);
+    lcd_send_string(buffer);	
+	vTaskDelay(1000/ portTICK_RATE_MS);
+}
+}
+
+
+
+
+#include "driver/i2c.h"
+#include "esp_log.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <string.h>
+#include "lcd-i2c.h"
+#include <time.h>
+
+#define SECONDS_MASK 0x7f
+#define HOUR12_MASK  0x1f
+#define HOUR24_MASK  0x3f
+#define HOUR12_BIT  (1 << 6)
+#define PM_BIT      (1 << 5)
+#define DS1307_ADDR 0x68
+
+static uint8_t bcd2dec(uint8_t val)
+{
+    return (val/16) * 10 + (val %16);
+}
+
+static uint8_t dec2bcd(uint8_t val)
+{
+    return ((val / 10) << 4) + (val % 10);
+}
+
+void ds1307_set_time(const struct tm *time)
+{
+    uint8_t buf[7] = {
+        dec2bcd(time->tm_sec),
+        dec2bcd(time->tm_min),
+        dec2bcd(time->tm_hour),
+        dec2bcd(time->tm_wday + 1),
+        dec2bcd(time->tm_mday),
+        dec2bcd(time->tm_mon + 1),
+        dec2bcd(time->tm_year - 100)
+    };
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, (DS1307_ADDR << 1) | I2C_MASTER_WRITE, true);
+    i2c_master_write_byte(cmd, 0x00, true);
+    i2c_master_write(cmd, buf, 7, true);
+    i2c_master_stop(cmd);
+    i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000 / portTICK_RATE_MS);
+    i2c_cmd_link_delete(cmd);
+
+}
+
+void ds1307_get_time(struct tm *time)
+{
+    uint8_t buf[7];
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, (DS1307_ADDR << 1) | I2C_MASTER_WRITE, true);
+    i2c_master_write_byte(cmd, 0x00, true);
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, (DS1307_ADDR << 1) | I2C_MASTER_READ, true);
+    i2c_master_read(cmd, buf, 7, I2C_MASTER_LAST_NACK);
+    i2c_master_stop(cmd);
+    i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000 / portTICK_RATE_MS);
+    i2c_cmd_link_delete(cmd);
+
+    time->tm_sec = bcd2dec(buf[0] & SECONDS_MASK);
+    time->tm_min = bcd2dec(buf[1]);
+    if(buf[2] & HOUR12_BIT)
+    {
+        // RTC in 12-hour mode
+        time->tm_hour = bcd2dec(buf[2] & HOUR12_MASK) - 1;
+        if (buf[2] & PM_BIT)
+            time->tm_hour += 12;
+    }
+    else
+        time->tm_hour = bcd2dec(buf[2] & HOUR24_MASK);
+    time->tm_wday = bcd2dec(buf[3]) - 1;
+    time->tm_mday = bcd2dec(buf[4]);
+    time->tm_mon  = bcd2dec(buf[5]) - 1;
+    time->tm_year = bcd2dec(buf[6]) + 100;
+}
+const char* get_day_of_week(const struct tm *time)
+{
+    static const char* const days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    return days[time->tm_wday];
+}
+void app_main() {
+    i2c_config_t i2c_config = {
+        .mode = I2C_MODE_MASTER,
+        .sda_io_num = 21,
+        .scl_io_num = 22,
+        .sda_pullup_en = GPIO_PULLUP_ENABLE,
+        .scl_pullup_en = GPIO_PULLUP_ENABLE,
+        .master.clk_speed = 100000
+    };
+    i2c_param_config(I2C_NUM_0, &i2c_config);
+    i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0);
+
+    struct tm time = {.tm_year = 123, .tm_mon = 04, .tm_mday = 17, .tm_wday=03, .tm_hour = 11, .tm_min =30, .tm_sec = 30};
+    ds1307_set_time(&time);
+
+    while (1) {
+        ds1307_get_time(&time);
+        const char* day_of_week = get_day_of_week(&time);
+        printf("%02d:%02d:%02d %s %02d/%02d/%04d \n", time.tm_hour, time.tm_min, time.tm_sec, day_of_week,
+                                                time.tm_mday,time.tm_mon + 1,time.tm_year + 1900);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
